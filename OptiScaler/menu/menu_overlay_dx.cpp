@@ -226,6 +226,12 @@ static void CleanupRenderTargetDx11(bool shutDown)
         g_pd3dRenderTarget = nullptr;
     }
 
+    if (g_pd3dDeviceContext != nullptr)
+    {
+        g_pd3dDeviceContext->Release();
+        g_pd3dDeviceContext = nullptr;
+    }
+
     if (g_pd3dDevice != nullptr)
     {
         g_pd3dDevice->Release();
@@ -269,11 +275,24 @@ static void RenderImGui_DX11(IDXGISwapChain* pSwapChain)
 
     if (io.BackendRendererUserData == nullptr)
     {
-        if (pSwapChain->GetDevice(IID_PPV_ARGS(&g_pd3dDevice)) == S_OK)
+        if (g_pd3dDevice == nullptr)
         {
-            g_pd3dDevice->GetImmediateContext(&g_pd3dDeviceContext);
-            ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+            if (pSwapChain->GetDevice(IID_PPV_ARGS(&g_pd3dDevice)) == S_OK)
+            {
+                g_pd3dDevice->GetImmediateContext(&g_pd3dDeviceContext);
+            }
         }
+
+        if (g_pd3dDevice && g_pd3dDeviceContext)
+            ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+        else
+            LOG_ERROR("ImGui_ImplDX11_Init skipped: device or context null");
+    }
+    else if (g_pd3dDeviceContext == nullptr && g_pd3dDevice != nullptr)
+    {
+        // Fallback: if ImGui is inited but we lost context (e.g. manual hook)
+        g_pd3dDevice->GetImmediateContext(&g_pd3dDeviceContext);
+        LOG_INFO("Recovered g_pd3dDeviceContext");
     }
 
     if (_isInited)
@@ -281,7 +300,7 @@ static void RenderImGui_DX11(IDXGISwapChain* pSwapChain)
         if (!g_pd3dRenderTarget)
             CreateRenderTargetDx11(pSwapChain);
 
-        if (ImGui::GetCurrentContext() && g_pd3dRenderTarget)
+        if (ImGui::GetCurrentContext() && g_pd3dRenderTarget && g_pd3dDeviceContext)
         {
             ImGui_ImplDX11_NewFrame();
             ImGui_ImplWin32_NewFrame();
@@ -293,6 +312,11 @@ static void RenderImGui_DX11(IDXGISwapChain* pSwapChain)
                 g_pd3dDeviceContext->OMSetRenderTargets(1, &g_pd3dRenderTarget, NULL);
                 ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
             }
+        }
+        else
+        {
+             if (!g_pd3dDeviceContext) LOG_ERROR("g_pd3dDeviceContext is null!");
+             if (!g_pd3dRenderTarget) LOG_ERROR("g_pd3dRenderTarget is null!");
         }
     }
 }
@@ -553,6 +577,9 @@ void MenuOverlayDx::CleanupRenderTarget(bool clearQueue, HWND hWnd)
 void MenuOverlayDx::Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags,
                             const DXGI_PRESENT_PARAMETERS* pPresentParameters, IUnknown* pDevice, HWND hWnd, bool isUWP)
 {
+    if (!Config::Instance()->OverlayMenu.value_or_default())
+        return;
+
     LOG_DEBUG("");
 
     ID3D12CommandQueue* cq = nullptr;
@@ -607,6 +634,15 @@ void MenuOverlayDx::Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
             g_pd3dDevice = device;
             g_pd3dDevice->AddRef();
 
+            g_pd3dDevice->GetImmediateContext(&g_pd3dDeviceContext);
+            if (!g_pd3dDeviceContext)
+            {
+                LOG_ERROR("GetImmediateContext failed!");
+                _isInited = false;
+                if (device) device->Release();
+                return;
+            }
+
             CreateRenderTargetDx11(pSwapChain);
             MenuOverlayBase::Dx11Ready();
             _isInited = true;
@@ -645,3 +681,4 @@ void MenuOverlayDx::Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     if (device12 != nullptr)
         device12->Release();
 }
+

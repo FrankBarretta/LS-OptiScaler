@@ -379,7 +379,51 @@ HRESULT IFeature_Dx11wDx12::CreateDx12Device(D3D_FEATURE_LEVEL InFeatureLevel)
         }
 
         IDXGIAdapter* hardwareAdapter = nullptr;
-        GetHardwareAdapter(factory, &hardwareAdapter, InFeatureLevel, true);
+
+        // Get the adapter LUID from the DX11 device to ensure we create
+        // the DX12 device on the same adapter (required for shared handles in multi-GPU systems)
+        LUID adapterLuid = {};
+        bool hasLuid = false;
+
+        if (Dx11Device != nullptr)
+        {
+            IDXGIDevice* dxgiDevice = nullptr;
+            if (Dx11Device->QueryInterface(IID_PPV_ARGS(&dxgiDevice)) == S_OK)
+            {
+                IDXGIAdapter* dx11Adapter = nullptr;
+                if (dxgiDevice->GetAdapter(&dx11Adapter) == S_OK)
+                {
+                    DXGI_ADAPTER_DESC desc = {};
+                    if (dx11Adapter->GetDesc(&desc) == S_OK)
+                    {
+                        adapterLuid = desc.AdapterLuid;
+                        hasLuid = true;
+                        LOG_INFO("DX11 device adapter: {}", wstring_to_string(desc.Description));
+                    }
+                    dx11Adapter->Release();
+                }
+                dxgiDevice->Release();
+            }
+        }
+
+        // Use LUID-based adapter lookup for multi-GPU systems
+        if (hasLuid)
+        {
+            result = factory->EnumAdapterByLuid(adapterLuid, IID_PPV_ARGS(&hardwareAdapter));
+            if (result == S_OK && hardwareAdapter != nullptr)
+            {
+                LOG_INFO("Using DX11-matched adapter for DX12 device");
+            }
+            else
+            {
+                LOG_WARN("Failed to find adapter by LUID, falling back to high performance: {:X}", (UINT) result);
+                GetHardwareAdapter(factory, &hardwareAdapter, InFeatureLevel, true);
+            }
+        }
+        else
+        {
+            GetHardwareAdapter(factory, &hardwareAdapter, InFeatureLevel, true);
+        }
 
         if (hardwareAdapter == nullptr)
             LOG_WARN("Can't get hardwareAdapter, will try nullptr!");

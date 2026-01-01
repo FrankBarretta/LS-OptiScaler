@@ -1,6 +1,7 @@
 #include <pch.h>
 #include <Config.h>
 #include <Util.h>
+#include <ReShadeManager.h>
 
 #include "FSR31Feature_Dx11.h"
 
@@ -199,6 +200,19 @@ bool FSR31FeatureDx11::Evaluate(ID3D11DeviceContext* DeviceContext, NVSDK_NGX_Pa
     InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &params.jitterOffset.x);
     InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &params.jitterOffset.y);
 
+    // ReShade Integration
+    if (ReShadeManager::Instance().Init() && ReShadeManager::Instance().IsConnected())
+    {
+        auto* data = ReShadeManager::Instance().GetData();
+        if (data)
+        {
+            // Override Jitter
+            params.jitterOffset.x = data->jitterX;
+            params.jitterOffset.y = data->jitterY;
+            LOG_DEBUG("Using ReShade Jitter: {0}, {1}", data->jitterX, data->jitterY);
+        }
+    }
+
     if (Config::Instance()->OverrideSharpness.value_or_default())
         _sharpness = Config::Instance()->Sharpness.value_or_default();
     else
@@ -275,6 +289,20 @@ bool FSR31FeatureDx11::Evaluate(ID3D11DeviceContext* DeviceContext, NVSDK_NGX_Pa
         return false;
     }
 
+    // ReShade MV override
+    if (ReShadeManager::Instance().IsConnected())
+    {
+        auto* data = ReShadeManager::Instance().GetData();
+        if (data && data->mv_resource != 0)
+        {
+            params.motionVectors =
+                ffxGetResource((ID3D11Resource*) data->mv_resource, L"FSR3_InputMotionVectors_ReShade",
+                               Fsr31::FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+            _hasMV = true;
+            LOG_DEBUG("Using ReShade MotionVectors");
+        }
+    }
+
     ID3D11Resource* paramOutput;
     if (InParameters->Get(NVSDK_NGX_Parameter_Output, &paramOutput) != NVSDK_NGX_Result_Success)
         InParameters->Get(NVSDK_NGX_Parameter_Output, (void**) &paramOutput);
@@ -328,6 +356,19 @@ bool FSR31FeatureDx11::Evaluate(ID3D11DeviceContext* DeviceContext, NVSDK_NGX_Pa
 
         if (LowResMV())
             return false;
+    }
+
+    // ReShade Depth override
+    if (ReShadeManager::Instance().IsConnected())
+    {
+        auto* data = ReShadeManager::Instance().GetData();
+        if (data && data->depth_resource != 0)
+        {
+            params.depth = ffxGetResource((ID3D11Resource*) data->depth_resource, L"FSR3_InputDepth_ReShade",
+                                          Fsr31::FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+            _hasDepth = true;
+            LOG_DEBUG("Using ReShade Depth");
+        }
     }
 
     ID3D11Resource* paramExp = nullptr;
@@ -587,15 +628,61 @@ FSR31FeatureDx11::~FSR31FeatureDx11()
     if (!IsInited())
         return;
 
-    if (!State::Instance().isShuttingDown)
+    // ALWAYS destroy the FFX context, even during shutdown
+    // Not destroying it leaves orphaned resources that crash 1-2 seconds later
+    // when FFX internal threads/callbacks access freed memory
+
+    // FFX SDK requires GPU to be COMPLETELY IDLE before destroying context
+    // A simple Flush() is NOT enough - we need to wait for GPU completion
+    if (DeviceContext != nullptr && Device != nullptr)
     {
-        auto errorCode = Fsr31::ffxFsr3ContextDestroy(&_upscalerContext);
+        // First flush any pending commands
+        DeviceContext->Flush();
 
-        if (errorCode != Fsr31::FFX_OK)
-            spdlog::error("FSR31FeatureDx11::~FSR31FeatureDx11 ffxFsr3ContextDestroy error: {0:x}", errorCode);
+        // Create an event query to wait for GPU idle
+        D3D11_QUERY_DESC queryDesc = {};
+        queryDesc.Query = D3D11_QUERY_EVENT;
+        queryDesc.MiscFlags = 0;
 
-        free(_upscalerContextDesc.backendInterfaceUpscaling.scratchBuffer);
+        ID3D11Query* pEventQuery = nullptr;
+        if (SUCCEEDED(Device->CreateQuery(&queryDesc, &pEventQuery)))
+        {
+            // Issue end on the query
+            DeviceContext->End(pEventQuery);
+
+            // Wait for GPU to complete (with timeout to prevent infinite hang)
+            BOOL queryData = FALSE;
+            int waitCount = 0;
+            const int maxWait = 1000; // ~1 second with 1ms sleep
+
+            while (DeviceContext->GetData(pEventQuery, &queryData, sizeof(queryData), 0) == S_FALSE)
+            {
+                if (++waitCount > maxWait)
+                {
+                    spdlog::warn("FSR31FeatureDx11::~FSR31FeatureDx11 GPU sync timed out after 1s");
+                    break;
+                }
+                Sleep(1);
+            }
+
+            pEventQuery->Release();
+            spdlog::info("FSR31FeatureDx11::~FSR31FeatureDx11 GPU sync completed after {}ms", waitCount);
+        }
+        else
+        {
+            // Fallback: add a small delay if query creation fails
+            spdlog::warn("FSR31FeatureDx11::~FSR31FeatureDx11 Query creation failed, using delay fallback");
+            Sleep(100);
+        }
     }
+
+    auto errorCode = Fsr31::ffxFsr3ContextDestroy(&_upscalerContext);
+
+    if (errorCode != Fsr31::FFX_OK)
+        spdlog::error("FSR31FeatureDx11::~FSR31FeatureDx11 ffxFsr3ContextDestroy error: {0:x}", errorCode);
+
+    if (_upscalerContextDesc.backendInterfaceUpscaling.scratchBuffer != nullptr)
+        free(_upscalerContextDesc.backendInterfaceUpscaling.scratchBuffer);
 
     SetInit(false);
 }

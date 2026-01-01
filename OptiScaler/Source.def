@@ -868,4 +868,11 @@ EnumerateLoadedModules = _EnumerateLoadedModules
 EnumDirTreeW = _EnumDirTreeW
 EnumDirTree = _EnumDirTree
 DbgHelpCreateUserDumpW = _DbgHelpCreateUserDumpW
+OptiScaler_Manual_Dx11_HookSwapChain
+OptiScaler_Manual_Dx11_Init
+OptiScaler_Manual_Dx11_CreateFeature
+OptiScaler_Manual_Dx11_Evaluate
+OptiScaler_ReloadConfig
+
+
 

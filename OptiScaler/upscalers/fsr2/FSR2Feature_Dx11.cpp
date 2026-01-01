@@ -1,6 +1,7 @@
 #include <pch.h>
 #include <Config.h>
 #include <Util.h>
+#include <ReShadeManager.h>
 
 #include "FSR2Feature_Dx11.h"
 
@@ -32,7 +33,7 @@ bool FSR2FeatureDx11::Init(ID3D11Device* InDevice, ID3D11DeviceContext* InContex
 
     if (InitFSR2(InParameters))
     {
-        if (!Config::Instance()->OverlayMenu.value_or_default() && (Imgui == nullptr || Imgui.get() == nullptr))
+        if (Config::Instance()->OverlayMenu.value_or_default() && (Imgui == nullptr || Imgui.get() == nullptr))
             Imgui = std::make_unique<Menu_Dx11>(Util::GetProcessWindow(), Device);
 
         OutputScaler = std::make_unique<OS_Dx11>("Output Scaling", InDevice, (TargetWidth() < DisplayWidth()));
@@ -500,6 +501,28 @@ bool FSR2FeatureDx11::Evaluate(ID3D11DeviceContext* InContext, NVSDK_NGX_Paramet
         params.motionVectorScale.y = MVScaleY;
     }
 
+    // ReShade Integration
+    if (ReShadeManager::Instance().Init() && ReShadeManager::Instance().IsConnected()) {
+        auto* data = ReShadeManager::Instance().GetData();
+        if (data) {
+            if (data->depth_resource != 0) {
+                params.depth = ffxGetResourceDX11(&_context, (ID3D11Resource*)data->depth_resource, (wchar_t*)L"FSR2_Depth_ReShade");
+                _hasDepth = true;
+                LOG_DEBUG("Using ReShade Depth");
+            }
+            if (data->mv_resource != 0) {
+                params.motionVectors = ffxGetResourceDX11(&_context, (ID3D11Resource*)data->mv_resource, (wchar_t*)L"FSR2_MotionVectors_ReShade");
+                _hasMV = true;
+                LOG_DEBUG("Using ReShade MotionVectors");
+            }
+            
+            // Override Jitter
+            params.jitterOffset.x = data->jitterX;
+            params.jitterOffset.y = data->jitterY;
+            LOG_DEBUG("Using ReShade Jitter: {0}, {1}", data->jitterX, data->jitterY);
+        }
+    }
+
     if (DepthInverted())
     {
         params.cameraFar = Config::Instance()->FsrCameraNear.value_or_default();
@@ -588,7 +611,7 @@ bool FSR2FeatureDx11::Evaluate(ID3D11DeviceContext* InContext, NVSDK_NGX_Paramet
     }
 
     // imgui
-    if (!Config::Instance()->OverlayMenu.value_or_default() && _frameCount > 30)
+    if (Config::Instance()->OverlayMenu.value_or_default() && _frameCount > 30)
     {
         if (Imgui != nullptr && Imgui.get() != nullptr)
         {

@@ -44,5 +44,7 @@ void HookDx12();
 void HookDxgi();
 void ReleaseDx12SwapChain(HWND hwnd);
 
+void OptiScaler_Manual_Dx11_HookSwapChain(void* swapChain);
+
 DXGI_FORMAT CurrentSwapchainFormat();
 } // namespace HooksDx

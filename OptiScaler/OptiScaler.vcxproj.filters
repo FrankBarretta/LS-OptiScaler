@@ -32,6 +32,9 @@
     <ClInclude Include="Config.h">
       <Filter>Config</Filter>
     </ClInclude>
+    <ClInclude Include="ReShadeManager.h">
+      <Filter>Config</Filter>
+    </ClInclude>
     <ClInclude Include="NVNGX_Parameter.h">
       <Filter>NVNGX</Filter>
     </ClInclude>
@@ -533,6 +536,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Config.cpp">
+      <Filter>Config</Filter>
+    </ClCompile>
+    <ClCompile Include="ReShadeManager.cpp">
       <Filter>Config</Filter>
     </ClCompile>
     <ClCompile Include="dllmain.cpp" />

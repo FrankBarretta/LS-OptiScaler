@@ -2680,3 +2680,75 @@ void HooksDx::UnHookDx()
 }
 
 #pragma endregion
+
+// Manual Hook Implementation
+
+typedef HRESULT(__stdcall* PFN_ManualPresent)(IDXGISwapChain* This, UINT SyncInterval, UINT Flags);
+typedef HRESULT(__stdcall* PFN_ManualPresent1)(IDXGISwapChain1* This, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pPresentParameters);
+
+static PFN_ManualPresent oManualPresent = nullptr;
+static PFN_ManualPresent1 oManualPresent1 = nullptr;
+
+static HRESULT __stdcall hkManualPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags)
+{
+    ID3D11Device* device = nullptr;
+    if (This->GetDevice(__uuidof(ID3D11Device), (void**)&device) == S_OK)
+    {
+        DXGI_SWAP_CHAIN_DESC desc;
+        if (This->GetDesc(&desc) == S_OK)
+        {
+             MenuOverlayDx::Present(This, SyncInterval, Flags, nullptr, device, desc.OutputWindow, false);
+        }
+        device->Release();
+    }
+    return oManualPresent(This, SyncInterval, Flags);
+}
+
+static HRESULT __stdcall hkManualPresent1(IDXGISwapChain1* This, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pPresentParameters)
+{
+    ID3D11Device* device = nullptr;
+    if (This->GetDevice(__uuidof(ID3D11Device), (void**)&device) == S_OK)
+    {
+        DXGI_SWAP_CHAIN_DESC desc;
+        if (This->GetDesc(&desc) == S_OK)
+        {
+             MenuOverlayDx::Present(This, SyncInterval, Flags, pPresentParameters, device, desc.OutputWindow, false);
+        }
+        device->Release();
+    }
+    return oManualPresent1(This, SyncInterval, Flags, pPresentParameters);
+}
+
+void HooksDx::OptiScaler_Manual_Dx11_HookSwapChain(void* swapChain)
+{
+    LOG_INFO("Manual Hook SwapChain called with {:X}", (uint64_t)swapChain);
+    IDXGISwapChain* sc = (IDXGISwapChain*)swapChain;
+    void** vtable = *(void***)sc;
+    
+    if (!oManualPresent)
+    {
+        oManualPresent = (PFN_ManualPresent)vtable[8];
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+        DetourAttach(&(PVOID&)oManualPresent, hkManualPresent);
+        DetourTransactionCommit();
+        LOG_INFO("Manual Hook Present attached");
+    }
+    
+    // Check for IDXGISwapChain1 for Present1
+    IDXGISwapChain1* sc1 = nullptr;
+    if (sc->QueryInterface(__uuidof(IDXGISwapChain1), (void**)&sc1) == S_OK)
+    {
+        if (!oManualPresent1)
+        {
+            void** vtable1 = *(void***)sc1;
+            oManualPresent1 = (PFN_ManualPresent1)vtable1[22];
+            DetourTransactionBegin();
+            DetourUpdateThread(GetCurrentThread());
+            DetourAttach(&(PVOID&)oManualPresent1, hkManualPresent1);
+            DetourTransactionCommit();
+            LOG_INFO("Manual Hook Present1 attached");
+        }
+        sc1->Release();
+    }
+}

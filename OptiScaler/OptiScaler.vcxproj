@@ -391,6 +391,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="upscalers\fsr2_212\FSR2Feature_Dx12_212.h" />
     <ClInclude Include="upscalers\fsr2_212\FSR2Feature_Vk_212.h" />
     <ClInclude Include="Config.h" />
+    <ClInclude Include="ReShadeManager.h" />
     <ClInclude Include="upscalers\fsr2\FSR2Feature.h" />
     <ClInclude Include="upscalers\fsr2\FSR2Feature_Dx11.h" />
     <ClInclude Include="upscalers\fsr2\FSR2Feature_Dx11On12.h" />
@@ -511,6 +512,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="upscalers\IFeature_Dx11wDx12.cpp" />
     <ClCompile Include="upscalers\IFeature_Dx11wDx12.h" />
     <ClCompile Include="Config.cpp" />
+    <ClCompile Include="ReShadeManager.cpp" />
     <ClCompile Include="upscalers\fsr2\FSR2Feature.cpp" />
     <ClCompile Include="upscalers\fsr2\FSR2Feature_Dx11.cpp" />
     <ClCompile Include="upscalers\fsr2\FSR2Feature_Dx11On12.cpp" />

@@ -45,6 +45,9 @@ typedef const char*(CDECL* PFN_wine_get_version)(void);
 typedef void (*PFN_InitializeASI)(void);
 typedef bool (*PFN_PatchResult)(void);
 
+// Forward declaration for FSR 3.1 cleanup function
+extern "C" void OptiScaler_Dx11_Cleanup();
+
 static inline void* ManualGetProcAddress(HMODULE hModule, const char* functionName)
 {
     if (!hModule)
@@ -1280,6 +1283,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         // unhookAdvapi32();
         // DetachHooks();
 
+        // Cleanup FSR 3.1 features BEFORE DLL unload to prevent crash
+        // FSR 3.1 has internal resources that crash if destroyed too late
+        OptiScaler_Dx11_Cleanup();
+
         if (skModule != nullptr)
             KernelBaseProxy::FreeLibrary_()(skModule);
 
@@ -1313,4 +1320,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     }
 
     return TRUE;
+}
+
+extern "C" __declspec(dllexport) void OptiScaler_Manual_Dx11_HookSwapChain(void* swapChain)
+{
+    HooksDx::OptiScaler_Manual_Dx11_HookSwapChain(swapChain);
 }

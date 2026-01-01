@@ -56,6 +56,14 @@ template <class T, HasDefaultValue defaultState = WithDefault> class CustomOptio
         }
     }
 
+    // Force update from config (for realtime reload) - unconditionally updates value
+    constexpr void force_from_config(const std::optional<T>& opt)
+    {
+        _configIni = opt;
+        _volatile = false;
+        std::optional<T>::operator=(opt);
+    }
+
     constexpr CustomOptional& operator=(const T& value)
     {
         _volatile = false;
@@ -100,12 +108,13 @@ template <class T, HasDefaultValue defaultState = WithDefault> class CustomOptio
     }
 
     constexpr T value_or_default() &&
-        requires(defaultState != NoDefault) {
-            return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
-        }
+        requires(defaultState != NoDefault)
+    {
+        return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
+    }
 
-        constexpr std::optional<T> value_for_config()
-            requires(defaultState == WithDefault)
+    constexpr std::optional<T> value_for_config()
+        requires(defaultState == WithDefault)
     {
         if (_volatile)
         {
@@ -439,15 +448,16 @@ class Config
 
     static Config* Instance();
 
+    bool Reload(std::filesystem::path iniPath);
+    bool ForceReload(); // Reload with force_from_config for real-time updates
+    std::filesystem::path absoluteFileName;
+
   private:
     inline static Config* _config;
 
     CSimpleIniA ini;
     CSimpleIniA fakenvapiIni;
-    std::filesystem::path absoluteFileName;
     std::wstring fileName = L"OptiScaler.ini";
-
-    bool Reload(std::filesystem::path iniPath);
 
     std::optional<std::string> readString(std::string section, std::string key, bool lowercase = false);
     std::optional<std::wstring> readWString(std::string section, std::string key, bool lowercase = false);

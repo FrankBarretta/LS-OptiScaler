@@ -572,6 +572,119 @@ bool Config::LoadFromPath(const wchar_t* InPath)
     return false;
 }
 
+// Force reload settings from INI - overwrites in-memory values
+bool Config::ForceReload()
+{
+    if (ini.LoadFile(absoluteFileName.c_str()) != SI_OK)
+    {
+        LOG_ERROR("ForceReload: Failed to load INI from {}", absoluteFileName.string());
+        return false;
+    }
+
+    LOG_INFO("ForceReload: Forcing reload of settings from {}", absoluteFileName.string());
+
+    // Store old upscaler to detect changes
+    std::string oldDx11Upscaler = Dx11Upscaler.value_or("fsr22");
+
+    // Upscalers
+    Dx11Upscaler.force_from_config(readString("Upscalers", "Dx11Upscaler", true));
+    Dx12Upscaler.force_from_config(readString("Upscalers", "Dx12Upscaler", true));
+    VulkanUpscaler.force_from_config(readString("Upscalers", "VulkanUpscaler", true));
+
+    // Sharpness
+    OverrideSharpness.force_from_config(readBool("Sharpness", "OverrideSharpness"));
+    if (auto setting = readFloat("Sharpness", "Sharpness"); setting.has_value())
+        Sharpness.force_from_config(std::clamp(setting.value(), 0.0f, 1.3f));
+
+    // RCAS
+    RcasEnabled.force_from_config(readBool("CAS", "Enabled"));
+    MotionSharpnessEnabled.force_from_config(readBool("CAS", "MotionSharpnessEnabled"));
+    MotionSharpnessDebug.force_from_config(readBool("CAS", "MotionSharpnessDebug"));
+    if (auto setting = readFloat("CAS", "MotionSharpness"); setting.has_value())
+        MotionSharpness.force_from_config(std::clamp(setting.value(), -1.3f, 1.3f));
+    if (auto setting = readFloat("CAS", "MotionThreshold"); setting.has_value())
+        MotionThreshold.force_from_config(std::clamp(setting.value(), 0.0f, 100.0f));
+    if (auto setting = readFloat("CAS", "MotionScaleLimit"); setting.has_value())
+        MotionScaleLimit.force_from_config(std::clamp(setting.value(), 0.01f, 100.0f));
+    ContrastEnabled.force_from_config(readBool("CAS", "ContrastEnabled"));
+    if (auto setting = readFloat("CAS", "Contrast"); setting.has_value())
+        Contrast.force_from_config(std::clamp(setting.value(), -2.0f, 2.0f));
+
+    // Output Scaling
+    OutputScalingEnabled.force_from_config(readBool("OutputScaling", "Enabled"));
+    OutputScalingUseFsr.force_from_config(readBool("OutputScaling", "UseFsr"));
+    OutputScalingDownscaler.force_from_config(readInt("OutputScaling", "Downscaler"));
+    if (auto setting = readFloat("OutputScaling", "Multiplier"); setting.has_value())
+        OutputScalingMultiplier.force_from_config(std::clamp(setting.value(), 0.5f, 3.0f));
+
+    // Init Flags
+    AutoExposure.force_from_config(readBool("InitFlags", "AutoExposure"));
+    HDR.force_from_config(readBool("InitFlags", "HDR"));
+    DepthInverted.force_from_config(readBool("InitFlags", "DepthInverted"));
+    JitterCancellation.force_from_config(readBool("InitFlags", "JitterCancellation"));
+    DisplayResolution.force_from_config(readBool("InitFlags", "DisplayResolution"));
+    DisableReactiveMask.force_from_config(readBool("InitFlags", "DisableReactiveMask"));
+
+    // Upscale Ratio Override
+    UpscaleRatioOverrideEnabled.force_from_config(readBool("UpscaleRatio", "UpscaleRatioOverrideEnabled"));
+    UpscaleRatioOverrideValue.force_from_config(readFloat("UpscaleRatio", "UpscaleRatioOverrideValue"));
+
+    // Quality Overrides
+    QualityRatioOverrideEnabled.force_from_config(readBool("QualityOverrides", "QualityRatioOverrideEnabled"));
+    QualityRatio_DLAA.force_from_config(readFloat("QualityOverrides", "QualityRatioDLAA"));
+    QualityRatio_UltraQuality.force_from_config(readFloat("QualityOverrides", "QualityRatioUltraQuality"));
+    QualityRatio_Quality.force_from_config(readFloat("QualityOverrides", "QualityRatioQuality"));
+    QualityRatio_Balanced.force_from_config(readFloat("QualityOverrides", "QualityRatioBalanced"));
+    QualityRatio_Performance.force_from_config(readFloat("QualityOverrides", "QualityRatioPerformance"));
+    QualityRatio_UltraPerformance.force_from_config(readFloat("QualityOverrides", "QualityRatioUltraPerformance"));
+
+    // FSR
+    FsrVelocity.force_from_config(readFloat("FSR", "VelocityFactor"));
+    FsrReactiveScale.force_from_config(readFloat("FSR", "ReactiveScale"));
+    FsrShadingScale.force_from_config(readFloat("FSR", "ShadingScale"));
+    FsrDebugView.force_from_config(readBool("FSR", "DebugView"));
+    Fsr3xIndex.force_from_config(readInt("FSR", "UpscalerIndex"));
+    DlssReactiveMaskBias.force_from_config(readFloat("FSR", "DlssReactiveMaskBias"));
+    FsrVerticalFov.force_from_config(readFloat("FSR", "VerticalFov"));
+    FsrHorizontalFov.force_from_config(readFloat("FSR", "HorizontalFov"));
+    FsrCameraNear.force_from_config(readFloat("FSR", "CameraNear"));
+    FsrCameraFar.force_from_config(readFloat("FSR", "CameraFar"));
+    FsrUseFsrInputValues.force_from_config(readBool("FSR", "UseFsrInputValues"));
+
+    // DLSS Render Presets
+    RenderPresetOverride.force_from_config(readBool("DLSS", "RenderPresetOverride"));
+    if (auto setting = readInt("DLSS", "RenderPresetForAll"); setting.has_value() && setting >= 0)
+        RenderPresetForAll.force_from_config(static_cast<uint32_t>(setting.value()));
+
+    // Hotfixes - Mipmap bias
+    if (auto setting = readFloat("Hotfix", "MipmapBiasOverride");
+        setting.has_value() && setting.value() <= 15.0 && setting.value() >= -15.0)
+        MipmapBiasOverride.force_from_config(setting);
+    MipmapBiasFixedOverride.force_from_config(readBool("Hotfix", "MipmapBiasFixedOverride"));
+    MipmapBiasScaleOverride.force_from_config(readBool("Hotfix", "MipmapBiasScaleOverride"));
+    if (auto setting = readInt("Hotfix", "AnisotropyOverride");
+        setting.has_value() && setting.value() <= 16 && setting.value() >= 1)
+        AnisotropyOverride.force_from_config(setting);
+
+    // DX11 with DX12
+    Dx11DelayedInit.force_from_config(readInt("Dx11withDx12", "UseDelayedInit"));
+    DontUseNTShared.force_from_config(readBool("Dx11withDx12", "DontUseNTShared"));
+
+    // Check if upscaler changed
+    std::string newDx11Upscaler = Dx11Upscaler.value_or("fsr22");
+    if (oldDx11Upscaler != newDx11Upscaler)
+    {
+        LOG_INFO("ForceReload: Upscaler changed from {} to {}, triggering backend change", oldDx11Upscaler,
+                 newDx11Upscaler);
+        State::Instance().newBackend = newDx11Upscaler;
+        for (auto& singleChangeBackend : State::Instance().changeBackend)
+            singleChangeBackend.second = true;
+    }
+
+    LOG_INFO("ForceReload: Complete");
+    return true;
+}
+
 std::string GetBoolValue(std::optional<bool> value)
 {
     if (!value.has_value())

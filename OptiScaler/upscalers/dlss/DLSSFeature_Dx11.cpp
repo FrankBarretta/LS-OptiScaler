@@ -2,6 +2,7 @@
 
 #include <pch.h>
 #include <Config.h>
+#include <ReShadeManager.h>
 
 #include <dxgi.h>
 
@@ -71,7 +72,7 @@ bool DLSSFeatureDx11::Init(ID3D11Device* InDevice, ID3D11DeviceContext* InContex
 
     if (initResult)
     {
-        if (!Config::Instance()->OverlayMenu.value_or_default() && (Imgui == nullptr || Imgui.get() == nullptr))
+        if (Config::Instance()->OverlayMenu.value_or_default() && (Imgui == nullptr || Imgui.get() == nullptr))
             Imgui = std::make_unique<Menu_Dx11>(GetForegroundWindow(), InDevice);
 
         OutputScaler = std::make_unique<OS_Dx11>("Output Scaling", InDevice, (TargetWidth() < DisplayWidth()));
@@ -132,6 +133,33 @@ bool DLSSFeatureDx11::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NGX_P
         {
             restoreUAVs[i] = nullptr;
             InDeviceContext->CSGetUnorderedAccessViews(i, 1, &restoreUAVs[i]);
+        }
+
+        // ReShade Integration
+        if (ReShadeManager::Instance().Init() && ReShadeManager::Instance().IsConnected())
+        {
+            auto* data = ReShadeManager::Instance().GetData();
+            if (data)
+            {
+                // Override Jitter
+                InParameters->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, data->jitterX);
+                InParameters->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, data->jitterY);
+                LOG_DEBUG("Using ReShade Jitter: {0}, {1}", data->jitterX, data->jitterY);
+
+                // Override Depth
+                if (data->depth_resource != 0)
+                {
+                    InParameters->Set(NVSDK_NGX_Parameter_Depth, (void*) data->depth_resource);
+                    LOG_DEBUG("Using ReShade Depth");
+                }
+
+                // Override MV
+                if (data->mv_resource != 0)
+                {
+                    InParameters->Set(NVSDK_NGX_Parameter_MotionVectors, (void*) data->mv_resource);
+                    LOG_DEBUG("Using ReShade MotionVectors");
+                }
+            }
         }
 
         ProcessEvaluateParams(InParameters);
@@ -235,7 +263,7 @@ bool DLSSFeatureDx11::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NGX_P
         }
 
         // imgui
-        if (!Config::Instance()->OverlayMenu.value_or_default() && _frameCount > 30 && paramOutput != nullptr)
+        if (Config::Instance()->OverlayMenu.value_or_default() && _frameCount > 30 && paramOutput != nullptr)
         {
             if (Imgui != nullptr && Imgui.get() != nullptr)
             {

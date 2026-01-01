@@ -24,8 +24,21 @@ class FSR31FeatureDx11on12 : public FSR31Feature, public IFeature_Dx11wDx12
 
     ~FSR31FeatureDx11on12()
     {
-        if (State::Instance().isShuttingDown)
-            return;
+        // ALWAYS destroy the FFX context, even during shutdown
+        // Not destroying it leaves orphaned resources that crash 1-2 seconds later
+        // when FFX internal threads/callbacks access freed memory
+
+        // Wait for GPU to complete all pending operations before destroying context
+        if (Dx12Fence != nullptr && Dx12FenceEvent != nullptr && Dx12CommandQueue != nullptr)
+        {
+            UINT64 fenceValue = Dx12Fence->GetCompletedValue() + 1;
+            Dx12CommandQueue->Signal(Dx12Fence, fenceValue);
+            if (Dx12Fence->GetCompletedValue() < fenceValue)
+            {
+                Dx12Fence->SetEventOnCompletion(fenceValue, Dx12FenceEvent);
+                WaitForSingleObject(Dx12FenceEvent, 5000); // 5 second timeout
+            }
+        }
 
         if (_context != nullptr)
             FfxApiProxy::D3D12_DestroyContext()(&_context, NULL);

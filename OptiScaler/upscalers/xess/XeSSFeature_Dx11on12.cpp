@@ -164,7 +164,7 @@ bool XeSSFeatureDx11on12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_N
     }
 
     // creatimg params for XeSS
-    xess_result_t xessResult;
+    xess_result_t xessResult = XESS_RESULT_ERROR_UNKNOWN;
     xess_d3d12_execute_params_t params {};
 
     InParameters->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &params.jitterOffsetX);

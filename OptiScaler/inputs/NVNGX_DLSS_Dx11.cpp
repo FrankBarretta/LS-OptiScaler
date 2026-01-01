@@ -211,13 +211,19 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_Shutdown()
 {
     shutdown = true;
 
-    // for (auto const& [key, val] : Dx11Contexts)
-    //{
-    //     if (val.feature)
-    //         NVSDK_NGX_D3D11_ReleaseFeature(val.feature->Handle());
-    // }
-
-    // Dx11Contexts.clear();
+    // Explicitly destroy all features before DLL unload
+    // This is critical for FSR 3.1 which has internal threads/callbacks
+    // that would crash if destroyed too late during static destruction
+    LOG_INFO("Cleaning up Dx11Contexts before shutdown");
+    for (auto& [key, val] : Dx11Contexts)
+    {
+        if (val.feature)
+        {
+            LOG_INFO("Destroying feature with handle {}", key);
+            val.feature.reset();
+        }
+    }
+    Dx11Contexts.clear();
 
     D3D11Device = nullptr;
     State::Instance().currentFeature = nullptr;
@@ -726,29 +732,47 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_EvaluateFeature(ID3D11DeviceConte
                 LOG_INFO("changing backend to {0}", State::Instance().newBackend);
 
                 auto dc = Dx11Contexts[handleId].feature.get();
+                LOG_INFO("dc obtained: {0:p}", (void*) dc);
 
                 if (State::Instance().newBackend != "dlssd" && State::Instance().newBackend != "dlss")
+                {
+                    LOG_INFO("Creating new params for {0}", State::Instance().newBackend);
                     Dx11Contexts[handleId].createParams = GetNGXParameters("OptiDx11");
+                }
                 else
+                {
+                    LOG_INFO("Using InParams for {0}", State::Instance().newBackend);
                     Dx11Contexts[handleId].createParams = InParameters;
+                }
 
-                Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags,
-                                                         dc->GetFeatureFlags());
-                Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_Width, dc->RenderWidth());
-                Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_Height, dc->RenderHeight());
-                Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_OutWidth, dc->DisplayWidth());
-                Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_OutHeight, dc->DisplayHeight());
-                Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_PerfQualityValue, dc->PerfQualityValue());
+                LOG_INFO("Setting params from old feature");
+                if (dc)
+                {
+                    Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags,
+                                                             dc->GetFeatureFlags());
+                    Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_Width, dc->RenderWidth());
+                    Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_Height, dc->RenderHeight());
+                    Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_OutWidth, dc->DisplayWidth());
+                    Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_OutHeight, dc->DisplayHeight());
+                    Dx11Contexts[handleId].createParams->Set(NVSDK_NGX_Parameter_PerfQualityValue,
+                                                             dc->PerfQualityValue());
+                }
+                else
+                {
+                    LOG_ERROR("dc is null!");
+                }
 
                 LOG_TRACE("sleeping before reset of current feature for 1000ms");
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
+                LOG_INFO("Resetting feature");
                 Dx11Contexts[handleId].feature.reset();
                 Dx11Contexts[handleId].feature = nullptr;
                 // auto it = std::find_if(Dx11Contexts.begin(), Dx11Contexts.end(), [&handleId](const auto& p) { return
                 // p.first == handleId; }); Dx11Contexts.erase(it);
 
                 State::Instance().currentFeature = nullptr;
+                LOG_INFO("Feature reset done");
             }
             else
             {
@@ -959,6 +983,128 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_EvaluateFeature(ID3D11DeviceConte
     HooksDx::dx11UpscaleTrig[nextFrameIndex] = true;
 
     return NVSDK_NGX_Result_Success;
+}
+
+#pragma endregion
+
+#pragma region OptiScaler Manual Dx11
+
+extern "C" __declspec(dllexport) void OptiScaler_Manual_Dx11_Init(ID3D11Device* device)
+{
+    LOG_INFO("OptiScaler_Manual_Dx11_Init called");
+    NVSDK_NGX_D3D11_Init_Ext(0x1337, L".", device, NVSDK_NGX_Version_API, nullptr);
+}
+
+extern "C" __declspec(dllexport) void* OptiScaler_Manual_Dx11_CreateFeature(ID3D11Device* device, int displayWidth,
+                                                                            int displayHeight, int renderWidth,
+                                                                            int renderHeight)
+{
+    LOG_INFO("OptiScaler_Manual_Dx11_CreateFeature called");
+
+    NVSDK_NGX_Parameter* params = nullptr;
+    NVSDK_NGX_D3D11_AllocateParameters(&params);
+
+    params->Set(NVSDK_NGX_Parameter_Width, renderWidth);
+    params->Set(NVSDK_NGX_Parameter_Height, renderHeight);
+    params->Set(NVSDK_NGX_Parameter_OutWidth, displayWidth);
+    params->Set(NVSDK_NGX_Parameter_OutHeight, displayHeight);
+    params->Set(NVSDK_NGX_Parameter_PerfQualityValue, NVSDK_NGX_PerfQuality_Value_Balanced);
+
+    ID3D11DeviceContext* context = nullptr;
+    device->GetImmediateContext(&context);
+
+    NVSDK_NGX_Handle* handle = nullptr;
+    NVSDK_NGX_D3D11_CreateFeature(context, NVSDK_NGX_Feature_SuperSampling, params, &handle);
+
+    context->Release();
+    return handle;
+}
+
+extern "C" __declspec(dllexport) void OptiScaler_Manual_Dx11_Evaluate(void* handle, ID3D11DeviceContext* context,
+                                                                      ID3D11Resource* color, ID3D11Resource* depth,
+                                                                      ID3D11Resource* mvec, ID3D11Resource* output,
+                                                                      float jitterX, float jitterY, float sharpness,
+                                                                      bool reset)
+{
+    // LOG_INFO("OptiScaler_Manual_Dx11_Evaluate called");
+
+    NVSDK_NGX_Handle* ngxHandle = (NVSDK_NGX_Handle*) handle;
+
+    NVSDK_NGX_Parameter* params = nullptr;
+    NVSDK_NGX_D3D11_AllocateParameters(&params);
+
+    params->Set(NVSDK_NGX_Parameter_Color, color);
+    params->Set(NVSDK_NGX_Parameter_Depth, depth);
+    params->Set(NVSDK_NGX_Parameter_MotionVectors, mvec);
+    params->Set(NVSDK_NGX_Parameter_Output, output);
+    params->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, jitterX);
+    params->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, jitterY);
+    params->Set(NVSDK_NGX_Parameter_Sharpness, sharpness);
+    params->Set(NVSDK_NGX_Parameter_Reset, reset ? 1 : 0);
+
+    NVSDK_NGX_D3D11_EvaluateFeature(context, ngxHandle, params, nullptr);
+
+    NVSDK_NGX_D3D11_DestroyParameters(params);
+}
+
+extern "C" __declspec(dllexport) void __cdecl OptiScaler_ReloadConfig()
+{
+    if (Config::Instance() != nullptr)
+    {
+        // Use ForceReload to unconditionally update settings from INI
+        Config::Instance()->ForceReload();
+        LOG_INFO("Config force-reloaded via external request");
+    }
+}
+
+// Explicitly trigger a backend change with specified upscaler
+extern "C" __declspec(dllexport) void __cdecl OptiScaler_ChangeBackend(const char* backendName)
+{
+    if (backendName == nullptr || backendName[0] == '\0')
+    {
+        LOG_WARN("OptiScaler_ChangeBackend called with empty backend name");
+        return;
+    }
+
+    LOG_INFO("OptiScaler_ChangeBackend: Changing to {}", backendName);
+    State::Instance().newBackend = backendName;
+    for (auto& singleChangeBackend : State::Instance().changeBackend)
+        singleChangeBackend.second = true;
+}
+
+// Trigger reinit of current upscaler (for settings that require reinit like init flags)
+extern "C" __declspec(dllexport) void __cdecl OptiScaler_ReinitUpscaler()
+{
+    if (State::Instance().currentFeature != nullptr)
+    {
+        std::string currentBackend = Config::Instance()->Dx11Upscaler.value_or("fsr22");
+        LOG_INFO("OptiScaler_ReinitUpscaler: Reinitializing {}", currentBackend);
+        State::Instance().newBackend = currentBackend;
+        for (auto& singleChangeBackend : State::Instance().changeBackend)
+            singleChangeBackend.second = true;
+    }
+}
+
+// Called from dllmain.cpp during DLL_PROCESS_DETACH to cleanup FSR 3.1 features
+// This is critical to prevent crashes when the overlay is closed
+extern "C" __declspec(dllexport) void __cdecl OptiScaler_Dx11_Cleanup()
+{
+    LOG_INFO("OptiScaler_Dx11_Cleanup: Cleaning up Dx11Contexts");
+
+    for (auto& [key, val] : Dx11Contexts)
+    {
+        if (val.feature)
+        {
+            LOG_INFO("OptiScaler_Dx11_Cleanup: Destroying feature with handle {}", key);
+            val.feature.reset();
+        }
+    }
+    Dx11Contexts.clear();
+
+    D3D11Device = nullptr;
+    State::Instance().currentFeature = nullptr;
+
+    LOG_INFO("OptiScaler_Dx11_Cleanup: Complete");
 }
 
 #pragma endregion
