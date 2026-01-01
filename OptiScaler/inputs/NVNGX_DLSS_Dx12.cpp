@@ -994,3 +994,83 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_GetScratchBufferSize(NVSDK_NGX_Fe
 }
 
 #pragma endregion
+
+#pragma region OptiScaler Manual Dx12
+
+extern "C" __declspec(dllexport) void OptiScaler_Manual_Dx12_Init(ID3D12Device* device)
+{
+    LOG_INFO("OptiScaler_Manual_Dx12_Init called");
+    NVSDK_NGX_D3D12_Init_Ext(0x1337, L".", device, NVSDK_NGX_Version_API, nullptr);
+}
+
+extern "C" __declspec(dllexport) void* OptiScaler_Manual_Dx12_CreateFeature(ID3D12Device* device, int displayWidth,
+                                                                            int displayHeight, int renderWidth,
+                                                                            int renderHeight)
+{
+    LOG_INFO("OptiScaler_Manual_Dx12_CreateFeature called");
+
+    NVSDK_NGX_Parameter* params = nullptr;
+    NVSDK_NGX_D3D12_AllocateParameters(&params);
+
+    params->Set(NVSDK_NGX_Parameter_Width, renderWidth);
+    params->Set(NVSDK_NGX_Parameter_Height, renderHeight);
+    params->Set(NVSDK_NGX_Parameter_OutWidth, displayWidth);
+    params->Set(NVSDK_NGX_Parameter_OutHeight, displayHeight);
+    params->Set(NVSDK_NGX_Parameter_PerfQualityValue, NVSDK_NGX_PerfQuality_Value_Balanced);
+
+    NVSDK_NGX_Handle* handle = nullptr;
+    // Passing nullptr for command list as we don't have one here. 
+    // If OptiScaler requires it, we might need to change this.
+    NVSDK_NGX_D3D12_CreateFeature(nullptr, NVSDK_NGX_Feature_SuperSampling, params, &handle);
+
+    return handle;
+}
+
+extern "C" __declspec(dllexport) void OptiScaler_Manual_Dx12_Evaluate(void* handle, ID3D12GraphicsCommandList* commandList,
+                                                                      ID3D12Resource* color, ID3D12Resource* depth,
+                                                                      ID3D12Resource* mvec, ID3D12Resource* output,
+                                                                      float jitterX, float jitterY, float sharpness,
+                                                                      bool reset)
+{
+    // LOG_INFO("OptiScaler_Manual_Dx12_Evaluate called");
+
+    NVSDK_NGX_Handle* ngxHandle = (NVSDK_NGX_Handle*) handle;
+
+    NVSDK_NGX_Parameter* params = nullptr;
+    NVSDK_NGX_D3D12_AllocateParameters(&params);
+
+    params->Set(NVSDK_NGX_Parameter_Color, color);
+    params->Set(NVSDK_NGX_Parameter_Depth, depth);
+    params->Set(NVSDK_NGX_Parameter_MotionVectors, mvec);
+    params->Set(NVSDK_NGX_Parameter_Output, output);
+    params->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, jitterX);
+    params->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, jitterY);
+    params->Set(NVSDK_NGX_Parameter_Sharpness, sharpness);
+    params->Set(NVSDK_NGX_Parameter_Reset, reset ? 1 : 0);
+
+    NVSDK_NGX_D3D12_EvaluateFeature(commandList, ngxHandle, params, nullptr);
+
+    NVSDK_NGX_D3D12_DestroyParameters(params);
+}
+
+extern "C" __declspec(dllexport) void __cdecl OptiScaler_Dx12_Cleanup()
+{
+    LOG_INFO("OptiScaler_Dx12_Cleanup: Cleaning up Dx12Contexts");
+
+    for (auto& [key, val] : Dx12Contexts)
+    {
+        if (val.feature)
+        {
+            LOG_INFO("OptiScaler_Dx12_Cleanup: Destroying feature with handle {}", key);
+            val.feature.reset();
+        }
+    }
+    Dx12Contexts.clear();
+
+    D3D12Device = nullptr;
+    State::Instance().currentFeature = nullptr;
+
+    LOG_INFO("OptiScaler_Dx12_Cleanup: Complete");
+}
+
+#pragma endregion

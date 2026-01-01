@@ -511,6 +511,8 @@ class Config
     bool ReloadFakenvapi();
     bool SaveFakenvapiIni();
 
+    void ForceReload();
+
     void CheckUpscalerFiles();
 
     std::vector<std::string> GetConfigLog();

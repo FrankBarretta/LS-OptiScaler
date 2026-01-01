@@ -46,6 +46,11 @@ Config::Config()
     Reload(absoluteFileName);
 }
 
+void Config::ForceReload()
+{
+    Reload(absoluteFileName);
+}
+
 bool Config::Reload(std::filesystem::path iniPath)
 {
     auto pathWStr = iniPath.wstring();
