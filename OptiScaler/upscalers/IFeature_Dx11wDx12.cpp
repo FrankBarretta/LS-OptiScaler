@@ -387,7 +387,24 @@ HRESULT IFeature_Dx11wDx12::CreateDx12Device(D3D_FEATURE_LEVEL InFeatureLevel)
         }
 
         IDXGIAdapter* hwAdapter = nullptr;
-        GetHardwareAdapter(factory, &hwAdapter, InFeatureLevel, true);
+
+        // Try to get adapter from Dx11Device
+        IDXGIDevice* dxgiDevice = nullptr;
+        if (Dx11Device && Dx11Device->QueryInterface(IID_PPV_ARGS(&dxgiDevice)) == S_OK)
+        {
+            if (dxgiDevice->GetAdapter(&hwAdapter) == S_OK)
+            {
+                DXGI_ADAPTER_DESC desc;
+                if (hwAdapter->GetDesc(&desc) == S_OK)
+                {
+                    LOG_INFO("Using Dx11Device adapter: {}", wstring_to_string(desc.Description));
+                }
+            }
+            dxgiDevice->Release();
+        }
+
+        if (hwAdapter == nullptr)
+            GetHardwareAdapter(factory, &hwAdapter, InFeatureLevel, true);
 
         if (hwAdapter == nullptr)
             LOG_WARN("Can't get hwAdapter, will try nullptr!");
@@ -889,6 +906,11 @@ bool IFeature_Dx11wDx12::BaseInit(ID3D11Device* InDevice, ID3D11DeviceContext* I
 IFeature_Dx11wDx12::IFeature_Dx11wDx12(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters)
     : IFeature(InHandleId, InParameters), IFeature_Dx11(InHandleId, InParameters)
 {
+    // Ensure d3d12.dll is loaded for DX11on12 features
+    if (GetModuleHandle(L"d3d12.dll") == nullptr)
+    {
+        LoadLibrary(L"d3d12.dll");
+    }
 }
 
 IFeature_Dx11wDx12::~IFeature_Dx11wDx12()

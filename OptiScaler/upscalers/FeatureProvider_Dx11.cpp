@@ -82,6 +82,7 @@ bool FeatureProvider_Dx11::GetFeature(std::string upscalerName, UINT handleId, N
 
     if (!(*feature)->ModuleLoaded())
     {
+        LOG_WARN("Feature {} module not loaded, falling back to fsr22", upscalerName);
         (*feature).reset();
         *feature = std::make_unique<FSR2FeatureDx11>(handleId, parameters);
         upscalerName = "fsr22";
