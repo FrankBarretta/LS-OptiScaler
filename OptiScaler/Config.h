@@ -58,6 +58,17 @@ template <class T, HasDefaultValue defaultState = WithDefault> class CustomOptio
         }
     }
 
+    // Force update from config, regardless of current value (for real-time reload)
+    constexpr void force_from_config(const std::optional<T>& opt)
+    {
+        _configIni = opt;
+        _volatile = false;
+        if (opt.has_value())
+            std::optional<T>::operator=(opt.value());
+        else
+            std::optional<T>::reset();
+    }
+
     constexpr CustomOptional& operator=(const T& value)
     {
         _volatile = false;
@@ -102,12 +113,13 @@ template <class T, HasDefaultValue defaultState = WithDefault> class CustomOptio
     }
 
     constexpr T value_or_default() &&
-        requires(defaultState != NoDefault) {
-            return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
-        }
+        requires(defaultState != NoDefault)
+    {
+        return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
+    }
 
-        constexpr std::optional<T> value_for_config(bool forceSave = false)
-            requires(defaultState == WithDefault)
+    constexpr std::optional<T> value_for_config(bool forceSave = false)
+        requires(defaultState == WithDefault)
     {
         if (_volatile)
         {

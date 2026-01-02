@@ -48,7 +48,94 @@ Config::Config()
 
 void Config::ForceReload()
 {
-    Reload(absoluteFileName);
+    LOG_INFO("ForceReload: Re-reading config and forcing updates");
+
+    if (ini.LoadFile(absoluteFileName.c_str()) != SI_OK)
+    {
+        LOG_ERROR("ForceReload: Failed to reload INI file");
+        return;
+    }
+
+    // Force update upscalers (most commonly changed)
+    Dx11Upscaler.force_from_config(readString("Upscalers", "Dx11Upscaler", true));
+    Dx12Upscaler.force_from_config(readString("Upscalers", "Dx12Upscaler", true));
+    VulkanUpscaler.force_from_config(readString("Upscalers", "VulkanUpscaler", true));
+
+    // Force update sharpness settings
+    OverrideSharpness.force_from_config(readBool("Sharpness", "OverrideSharpness"));
+    if (auto setting = readFloat("Sharpness", "Sharpness"); setting.has_value())
+        Sharpness.force_from_config(std::clamp(setting.value(), 0.0f, 1.3f));
+    else
+        Sharpness.force_from_config(std::nullopt);
+
+    // Force update Frame Generation settings
+    FGEnabled.force_from_config(readBool("FrameGen", "Enabled"));
+    FGDebugView.force_from_config(readBool("FrameGen", "DebugView"));
+
+    // Force update RCAS/CAS settings
+    RcasEnabled.force_from_config(readBool("CAS", "Enabled"));
+    MotionSharpnessEnabled.force_from_config(readBool("CAS", "MotionSharpnessEnabled"));
+    MotionSharpnessDebug.force_from_config(readBool("CAS", "MotionSharpnessDebug"));
+    if (auto setting = readFloat("CAS", "MotionSharpness"); setting.has_value())
+        MotionSharpness.force_from_config(std::clamp(setting.value(), -1.3f, 1.3f));
+    if (auto setting = readFloat("CAS", "MotionThreshold"); setting.has_value())
+        MotionThreshold.force_from_config(std::clamp(setting.value(), 0.0f, 100.0f));
+    if (auto setting = readFloat("CAS", "MotionScaleLimit"); setting.has_value())
+        MotionScaleLimit.force_from_config(std::clamp(setting.value(), 0.01f, 100.0f));
+    ContrastEnabled.force_from_config(readBool("CAS", "ContrastEnabled"));
+    if (auto setting = readFloat("CAS", "Contrast"); setting.has_value())
+        Contrast.force_from_config(std::clamp(setting.value(), -2.0f, 2.0f));
+
+    // Force update quality ratio settings
+    QualityRatioOverrideEnabled.force_from_config(readBool("QualityOverrides", "QualityRatioOverrideEnabled"));
+    QualityRatio_DLAA.force_from_config(readFloat("QualityOverrides", "QualityRatioDLAA"));
+    QualityRatio_UltraQuality.force_from_config(readFloat("QualityOverrides", "QualityRatioUltraQuality"));
+    QualityRatio_Quality.force_from_config(readFloat("QualityOverrides", "QualityRatioQuality"));
+    QualityRatio_Balanced.force_from_config(readFloat("QualityOverrides", "QualityRatioBalanced"));
+    QualityRatio_Performance.force_from_config(readFloat("QualityOverrides", "QualityRatioPerformance"));
+    QualityRatio_UltraPerformance.force_from_config(readFloat("QualityOverrides", "QualityRatioUltraPerformance"));
+
+    // Force update output scaling
+    OutputScalingEnabled.force_from_config(readBool("OutputScaling", "Enabled"));
+    OutputScalingUseFsr.force_from_config(readBool("OutputScaling", "UseFsr"));
+    if (auto setting = readFloat("OutputScaling", "Multiplier"); setting.has_value())
+        OutputScalingMultiplier.force_from_config(std::clamp(setting.value(), 0.5f, 3.0f));
+
+    // Force update upscale ratio override
+    UpscaleRatioOverrideEnabled.force_from_config(readBool("UpscaleRatio", "UpscaleRatioOverrideEnabled"));
+    UpscaleRatioOverrideValue.force_from_config(readFloat("UpscaleRatio", "UpscaleRatioOverrideValue"));
+
+    // Force update FSR settings
+    FsrDebugView.force_from_config(readBool("FSR", "DebugView"));
+    FsrVelocity.force_from_config(readFloat("FSR", "VelocityFactor"));
+    FsrReactiveScale.force_from_config(readFloat("FSR", "ReactiveScale"));
+    FsrShadingScale.force_from_config(readFloat("FSR", "ShadingScale"));
+    FsrVerticalFov.force_from_config(readFloat("FSR", "VerticalFov"));
+    FsrHorizontalFov.force_from_config(readFloat("FSR", "HorizontalFov"));
+    FsrCameraNear.force_from_config(readFloat("FSR", "CameraNear"));
+    FsrCameraFar.force_from_config(readFloat("FSR", "CameraFar"));
+
+    // Force update DLSS settings
+    DLSSEnabled.force_from_config(readBool("DLSS", "Enabled"));
+    RenderPresetOverride.force_from_config(readBool("DLSS", "RenderPresetOverride"));
+    if (auto setting = readInt("DLSS", "RenderPresetForAll");
+        setting.has_value() && setting >= 0 && (setting < 17 || setting == 0x00FFFFFF))
+        RenderPresetForAll.force_from_config(static_cast<uint32_t>(setting.value()));
+
+    // Force update mipmap bias
+    if (auto setting = readFloat("Mipmap", "MipmapBiasOverride");
+        setting.has_value() && setting.value() <= 15.0 && setting.value() >= -15.0)
+        MipmapBiasOverride.force_from_config(setting);
+    MipmapBiasFixedOverride.force_from_config(readBool("Mipmap", "MipmapBiasFixedOverride"));
+    MipmapBiasScaleOverride.force_from_config(readBool("Mipmap", "MipmapBiasScaleOverride"));
+    MipmapBiasOverrideAll.force_from_config(readBool("Mipmap", "MipmapBiasOverrideAll"));
+
+    // Force update anisotropy
+    if (auto setting = readInt("Anisotropy", "AnisotropyOverride");
+        setting.has_value() && setting.value() <= 16 && setting.value() >= 1)
+        AnisotropyOverride.force_from_config(setting);
+
+    LOG_INFO("ForceReload: Config force-reloaded successfully");
 }
 
 bool Config::Reload(std::filesystem::path iniPath)

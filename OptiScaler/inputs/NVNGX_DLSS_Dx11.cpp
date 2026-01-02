@@ -728,6 +728,57 @@ extern "C" __declspec(dllexport) void __cdecl OptiScaler_ChangeBackend(const cha
         singleChangeBackend.second = true;
 }
 
+// Apply settings from INI immediately without restart
+// This is the main function ReOptiScale should call after saving INI changes
+extern "C" __declspec(dllexport) bool __cdecl OptiScaler_ApplySettings()
+{
+    LOG_INFO("OptiScaler_ApplySettings: Applying settings in real-time");
+
+    if (Config::Instance() == nullptr)
+    {
+        LOG_ERROR("OptiScaler_ApplySettings: Config instance is null");
+        return false;
+    }
+
+    // Store current upscaler before reload
+    std::string oldDx11Upscaler = Config::Instance()->Dx11Upscaler.value_or("fsr22");
+    std::string oldDx12Upscaler = Config::Instance()->Dx12Upscaler.value_or("xess");
+
+    // Force reload all settings from INI
+    Config::Instance()->ForceReload();
+
+    // Check if upscaler changed and trigger backend switch
+    std::string newDx11Upscaler = Config::Instance()->Dx11Upscaler.value_or("fsr22");
+    std::string newDx12Upscaler = Config::Instance()->Dx12Upscaler.value_or("xess");
+
+    bool upscalerChanged = false;
+
+    // Check DX11 upscaler change
+    if (oldDx11Upscaler != newDx11Upscaler)
+    {
+        LOG_INFO("OptiScaler_ApplySettings: DX11 upscaler changed from {} to {}", oldDx11Upscaler, newDx11Upscaler);
+        State::Instance().newBackend = newDx11Upscaler;
+        upscalerChanged = true;
+    }
+    // Check DX12 upscaler change
+    else if (oldDx12Upscaler != newDx12Upscaler)
+    {
+        LOG_INFO("OptiScaler_ApplySettings: DX12 upscaler changed from {} to {}", oldDx12Upscaler, newDx12Upscaler);
+        State::Instance().newBackend = newDx12Upscaler;
+        upscalerChanged = true;
+    }
+
+    if (upscalerChanged)
+    {
+        for (auto& singleChangeBackend : State::Instance().changeBackend)
+            singleChangeBackend.second = true;
+    }
+
+    LOG_INFO("OptiScaler_ApplySettings: Settings applied successfully (upscaler change: {})",
+             upscalerChanged ? "yes" : "no");
+    return true;
+}
+
 // Trigger reinit of current upscaler (for settings that require reinit like init flags)
 extern "C" __declspec(dllexport) void __cdecl OptiScaler_ReinitUpscaler()
 {
